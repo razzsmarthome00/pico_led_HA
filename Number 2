@@ -1,0 +1,339 @@
+import network
+import socket
+import urequests
+from time import sleep
+from picozero import pico_temp_sensor, pico_led
+import machine
+import array, time
+from machine import Pin
+import rp2
+
+ssid = 'Ahlsmed'
+password = 'Ahlsmed00!'
+
+
+def connect():
+    #Connect to WLAN
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(ssid, password)
+    while wlan.isconnected() == False:
+        print('Waiting for connection...')
+        sleep(1)        
+    ip = wlan.ifconfig()[0]
+    print(f'Connected on {ip}')
+    return ip
+
+
+
+def open_socket(ip):
+    # Open a socket
+    address = (ip, 80)
+    connection = socket.socket()
+    connection.bind(address)
+    connection.listen(1)
+    return connection
+
+
+def webpage(temperature, state):
+    #Template HTML
+    html = f"""
+            <!DOCTYPE html>
+            <html>
+            <form action="./lighton">
+            <input type="submit" value="Light on" />
+            </form>
+            <form action="./lightoff">
+            <input type="submit" value="Light off" />
+            </form>
+            <form action="./rainbow">
+            <input type="submit" value="Rainbow" />
+            </form>
+            <form action="./brightness_up">
+            <input type="submit" value="Brightness Up" />
+            </form>
+            <form action="./brightness_down">
+            <input type="submit" value="Brightness Down" />
+            </form>
+            <form action="./red">
+            <input type="submit" value="Red" />
+            </form>
+            <form action="./black">
+            <input type="submit" value="Black" />
+            </form>
+            <form action="./yellow">
+            <input type="submit" value="Yellow" />
+            </form>
+            <form action="./green">
+            <input type="submit" value="Green" />
+            </form>
+            <form action="./cyan">
+            <input type="submit" value="Cyan" />
+            </form>
+            <form action="./blue">
+            <input type="submit" value="Blue" />
+            </form>
+            <form action="./purple">
+            <input type="submit" value="Purple" />
+            </form>
+            <form action="./white">
+            <input type="submit" value="White" />
+            </form>
+            
+            <form>
+              <div>
+                <label for="brightness">Brightness value (0-100):</label>
+                <input
+                  id="brightness"
+                  type="number"
+                  name="brightness"
+                  min="0"
+                  max="100"
+                  required />
+                <span class="validity"></span>
+              </div>
+              <div>
+                <input type="submit" />
+              </div>
+            </form>
+             
+            <p>LED is {state}</p>
+            <p>Temperature is {temperature}</p>
+            </body>
+            </html>
+            """
+    return str(html)
+
+
+def serve(connection):
+    #Start a web server
+    pixels_kill()
+    state = 'OFF'
+    pico_led.off()
+    temperature = 0
+    while True:
+        client = connection.accept()[0]
+        request = client.recv(1024)
+        request = str(request)
+        global brightness
+        global run
+
+        try:
+            request = request.split()[1]
+        except IndexError:
+            pass
+        
+        try:
+            a = int(request[-3])
+            brightness = 1
+            brightness_set()
+            if brightness >0:
+                state = 'ON'
+            else:
+                state ='OFF'
+        except Exception:
+    
+            try:
+                a = int(request[-2])
+                a = request[-2]
+                b = request[-1]
+                brightness = int(a+b)/100
+                brightness_set()
+                if brightness >0:
+                    state = 'ON'
+                else:
+                    state ='OFF'
+            except Exception:
+        
+                try:
+                    a = int(request[-1])
+                    brightness = a/100
+                    brightness_set()
+                    if brightness >0:
+                        state = 'ON'
+                    else:
+                        state ='OFF'
+                except Exception:
+                    pass
+        
+                pass
+    
+            pass
+        print(request)
+        if request == '/lighton?' or request == '/lighton':
+            pixels_show()
+            state = 'ON'
+        elif request =='/lightoff?' or request =='/lightoff':
+            pixels_kill()
+            state = 'OFF'
+        elif request =='/red?' or request =='/red':
+            pixels_fill(RED)
+            pixels_show()
+            state = 'ON'
+        elif request =='/black?' or request =='/black':
+            pixels_fill(BLACK)
+            pixels_show()
+            state = 'ON'
+        elif request =='/yellow?' or request =='/yellow':
+            pixels_fill(YELLOW)
+            pixels_show()
+            state = 'ON'
+        elif request =='/green?' or request =='/green':
+            pixels_fill(GREEN)
+            pixels_show()
+            state = 'ON'
+        elif request =='/cyan?' or request =='/cyan':
+            pixels_fill(CYAN)
+            pixels_show()
+            state = 'ON'
+        elif request =='/blue?' or request =='/blue':
+            pixels_fill(BLUE)
+            pixels_show()
+            state = 'ON'
+        elif request =='/purple?' or request =='/purple':
+            pixels_fill(PURPLE)
+            pixels_show()
+            state = 'ON'
+        elif request =='/white?' or request =='/white':
+            pixels_fill(WHITE)
+            pixels_show()
+            state = 'ON'
+        elif request =='/rainbow?' or request =='/rainbow':
+            rainbow_cycle(0)
+            state = 'ON'
+        elif request =='/brightness_up?' or request =='/brightness_up':
+            if brightness<1:
+                bright= brightness + 0.1
+                brightness=bright
+                brightness_set()
+                state = 'ON'
+            else:
+                pass
+                
+        elif request =='/brightness_down?' or request =='/brightness_down':
+            if brightness>0:
+                brightness=brightness - 0.1
+                brightness_set()
+                if brightness == 0:
+                    state = 'OFF'
+                else:
+                    state = 'ON'
+            else:
+                pass
+        
+        temperature = pico_temp_sensor.temp
+        html = webpage(temperature, state)
+        client.send(html)
+        client.close()
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+    # Configure the number of WS2812 LEDs.
+NUM_LEDS = 15
+PIN_NUM = 22
+brightness = 1
+
+@rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT, autopull=True, pull_thresh=24)
+def ws2812():
+    T1 = 2
+    T2 = 5
+    T3 = 3
+    wrap_target()
+    label("bitloop")
+    out(x, 1)               .side(0)    [T3 - 1]
+    jmp(not_x, "do_zero")   .side(1)    [T1 - 1]
+    jmp("bitloop")          .side(1)    [T2 - 1]
+    label("do_zero")
+    nop()                   .side(0)    [T2 - 1]
+    wrap()
+
+
+# Create the StateMachine with the ws2812 program, outputting on pin
+sm = rp2.StateMachine(0, ws2812, freq=8_000_000, sideset_base=Pin(PIN_NUM))
+
+# Start the StateMachine, it will wait for data on its FIFO.
+sm.active(1)
+
+# Display a pattern on the LEDs via an array of LED RGB values.
+ar = array.array("I", [0 for _ in range(NUM_LEDS)])
+
+##########################################################################
+def pixels_show():
+    dimmer_ar = array.array("I", [0 for _ in range(NUM_LEDS)])
+    for i,c in enumerate(ar):
+        r = int(((c >> 8) & 0xFF) * brightness)
+        g = int(((c >> 16) & 0xFF) * brightness)
+        b = int((c & 0xFF) * brightness)
+        dimmer_ar[i] = (g<<16) + (r<<8) + b
+    sm.put(dimmer_ar, 8)
+    time.sleep_ms(10)
+
+def pixels_kill():
+    dimmer_ar = array.array("I", [0 for _ in range(NUM_LEDS)])
+    for i,c in enumerate(ar):
+        r = int(((c >> 8) & 0xFF) * 0)
+        g = int(((c >> 16) & 0xFF) * 0)
+        b = int((c & 0xFF) * 0)
+        dimmer_ar[i] = (g<<16) + (r<<8) + b
+    sm.put(dimmer_ar, 8)
+    time.sleep_ms(10)
+
+def brightness_set():
+    pixels_show()
+    
+def pixels_set(i, color):
+    ar[i] = (color[1]<<16) + (color[0]<<8) + color[2]
+
+def pixels_fill(color):
+    for i in range(len(ar)):
+        pixels_set(i, color)
+
+def color_chase(color, wait):
+    for i in range(NUM_LEDS):
+        pixels_set(i, color)
+        time.sleep(wait)
+        pixels_show()
+    time.sleep(0.2)
+ 
+def wheel(pos):
+    # Input a value 0 to 255 to get a color value.
+    # The colours are a transition r - g - b - back to r.
+    if pos < 0 or pos > 255:
+        return (0, 0, 0)
+    if pos < 85:
+        return (255 - pos * 3, pos * 3, 0)
+    if pos < 170:
+        pos -= 85
+        return (0, 255 - pos * 3, pos * 3)
+    pos -= 170
+    return (pos * 3, 0, 255 - pos * 3)
+ 
+ 
+def rainbow_cycle(wait):
+    for j in range(255):
+        for i in range(NUM_LEDS):
+            rc_index = (i * 256 // NUM_LEDS) + j
+            pixels_set(i, wheel(rc_index & 255))
+        pixels_show()
+        time.sleep(wait)
+
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+YELLOW = (255, 150, 0)
+GREEN = (0, 255, 0)
+CYAN = (0, 255, 255)
+BLUE = (0, 0, 255)
+PURPLE = (180, 0, 255)
+WHITE = (255, 255, 255)
+COLORS = (BLACK, RED, YELLOW, GREEN, CYAN, BLUE, PURPLE, WHITE)
+
+#---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+color_chase(BLUE,0)
+
+try:
+    ip = connect()
+    connection = open_socket(ip)
+    serve(connection)
+except KeyboardInterrupt:
+    machine.reset()
