@@ -8,8 +8,8 @@ import array, time
 from machine import Pin
 import rp2
 
-ssid = 'Ahlsmed'
-password = 'Ahlsmed00!'
+ssid = 'WIFI-NAME'
+password = 'WIFI-PASSWORD'
 
 
 def connect():
